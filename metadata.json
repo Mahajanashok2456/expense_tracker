@@ -1,5 +1,5 @@
 {
-  "name": "Zenith Expense Tracker",
+  "name": "expenso Expense Tracker",
   "description": "A privacy-first, client-side expense tracking application with full CRUD functionality for expenses and categories, data synchronization, an analytics dashboard, and data export capabilities. All data is stored locally in your browser.",
   "requestFramePermissions": []
 }
