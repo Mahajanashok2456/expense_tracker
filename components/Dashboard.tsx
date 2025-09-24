@@ -1,10 +1,10 @@
 
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Transaction, TransactionType } from '../types';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
-import { Download, TrendingUp, TrendingDown, MoreVertical } from 'lucide-react';
-import { exportToCSV, exportToJSON, exportToPDF } from '../utils/helpers';
+import { Download, TrendingUp, TrendingDown, MoreVertical, Upload, FileText, Database } from 'lucide-react';
+import { exportToCSV, exportToJSON, exportToPDF, importFromCSV, importFromJSON } from '../utils/helpers';
 import DynamicIcon from './ui/DynamicIcon';
 
 const SummaryCard: React.FC<{ title: string; amount: number; icon: React.ReactNode; color: string }> = ({ title, amount, icon, color }) => (
@@ -45,8 +45,9 @@ const TransactionItem: React.FC<{ transaction: Transaction }> = ({ transaction }
 };
 
 const Dashboard: React.FC = () => {
-  const { transactions, categories, getCategoryById } = useAppContext();
+  const { transactions, categories, getCategoryById, addTransaction, addCategory } = useAppContext();
   const dashboardRef = useRef<HTMLDivElement>(null);
+  const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error' | null, message: string }>({ type: null, message: '' });
 
   const summary = useMemo(() => {
     return transactions.reduce(
@@ -85,6 +86,97 @@ const Dashboard: React.FC = () => {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 5);
   }, [transactions]);
+
+  const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImportStatus({ type: null, message: '' });
+    
+    try {
+      const { transactions: importedTransactions, errors } = await importFromCSV(file);
+      
+      if (errors.length > 0) {
+        setImportStatus({ type: 'error', message: `Import completed with ${errors.length} errors: ${errors.slice(0, 3).join(', ')}${errors.length > 3 ? '...' : ''}` });
+      }
+      
+      if (importedTransactions.length > 0) {
+        importedTransactions.forEach(transaction => addTransaction(transaction));
+        setImportStatus({ 
+          type: 'success', 
+          message: `Successfully imported ${importedTransactions.length} transaction(s)${errors.length > 0 ? ` with ${errors.length} errors` : ''}` 
+        });
+      } else if (errors.length === 0) {
+        setImportStatus({ type: 'error', message: 'No valid transactions found in the CSV file' });
+      }
+    } catch (error) {
+      setImportStatus({ type: 'error', message: `Failed to import CSV: ${error}` });
+    }
+    
+    // Clear the input
+    event.target.value = '';
+  };
+
+  const handleImportJSON = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImportStatus({ type: null, message: '' });
+    
+    try {
+      const { data, errors } = await importFromJSON(file);
+      
+      if (errors.length > 0) {
+        setImportStatus({ type: 'error', message: `Import completed with ${errors.length} errors: ${errors.slice(0, 3).join(', ')}${errors.length > 3 ? '...' : ''}` });
+      }
+      
+      let importedCount = 0;
+      
+      // Import categories first
+      if (data.categories.length > 0) {
+        data.categories.forEach(category => {
+          // Check if category with same name already exists
+          const existingCategory = categories.find(c => c.name.toLowerCase() === category.name.toLowerCase());
+          if (!existingCategory) {
+            addCategory(category);
+            importedCount++;
+          }
+        });
+      }
+      
+      // Import transactions
+      if (data.transactions.length > 0) {
+        data.transactions.forEach(transaction => {
+          addTransaction(transaction);
+          importedCount++;
+        });
+      }
+      
+      if (importedCount > 0) {
+        setImportStatus({ 
+          type: 'success', 
+          message: `Successfully imported ${data.transactions.length} transaction(s) and ${data.categories.length} new categor${data.categories.length === 1 ? 'y' : 'ies'}${errors.length > 0 ? ` with ${errors.length} errors` : ''}` 
+        });
+      } else if (errors.length === 0) {
+        setImportStatus({ type: 'error', message: 'No valid data found in the JSON file' });
+      }
+    } catch (error) {
+      setImportStatus({ type: 'error', message: `Failed to import JSON: ${error}` });
+    }
+    
+    // Clear the input
+    event.target.value = '';
+  };
+
+  // Clear status message after 5 seconds
+  React.useEffect(() => {
+    if (importStatus.type) {
+      const timer = setTimeout(() => {
+        setImportStatus({ type: null, message: '' });
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [importStatus]);
 
   return (
     <div className="space-y-6" ref={dashboardRef}>
@@ -138,10 +230,100 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
        <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
-        <h2 className="text-xl font-semibold mb-4">Export Data</h2>
-        <div className="flex gap-4">
-            <button onClick={() => exportToCSV(transactions, 'transactions')} className="bg-slate-200 dark:bg-slate-700 px-4 py-2 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">Export as CSV</button>
-            <button onClick={() => exportToJSON({transactions, categories}, 'data')} className="bg-slate-200 dark:bg-slate-700 px-4 py-2 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">Export as JSON</button>
+        <h2 className="text-xl font-semibold mb-4 text-slate-800 dark:text-slate-100">Import/Export Data</h2>
+        
+        {/* Status Message */}
+        {importStatus.type && (
+          <div className={`mb-4 p-3 rounded-lg ${
+            importStatus.type === 'success' 
+              ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-800' 
+              : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800'
+          }`}>
+            {importStatus.message}
+          </div>
+        )}
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Import Section */}
+          <div>
+            <h3 className="text-lg font-medium mb-3 text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <Upload className="w-5 h-5" />
+              Import Data
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">
+                  Import from CSV (Transactions only)
+                </label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleImportCSV}
+                  className="hidden"
+                  id="csv-import"
+                />
+                <label
+                  htmlFor="csv-import"
+                  className="cursor-pointer inline-flex items-center gap-2 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  <FileText className="w-4 h-4" />
+                  Choose CSV File
+                </label>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">
+                  Import from JSON (Full backup)
+                </label>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportJSON}
+                  className="hidden"
+                  id="json-import"
+                />
+                <label
+                  htmlFor="json-import"
+                  className="cursor-pointer inline-flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors"
+                >
+                  <Database className="w-4 h-4" />
+                  Choose JSON File
+                </label>
+              </div>
+            </div>
+          </div>
+          
+          {/* Export Section */}
+          <div>
+            <h3 className="text-lg font-medium mb-3 text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <Download className="w-5 h-5" />
+              Export Data
+            </h3>
+            <div className="space-y-3">
+              <button 
+                onClick={() => exportToCSV(transactions, 'transactions')} 
+                className="w-full bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 px-4 py-2 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors flex items-center gap-2"
+              >
+                <FileText className="w-4 h-4" />
+                Export as CSV
+              </button>
+              <button 
+                onClick={() => exportToJSON({transactions, categories}, 'data')} 
+                className="w-full bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 px-4 py-2 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors flex items-center gap-2"
+              >
+                <Database className="w-4 h-4" />
+                Export as JSON
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        {/* Help Text */}
+        <div className="mt-4 p-3 bg-slate-50 dark:bg-slate-700 rounded-lg">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            <strong>CSV Import:</strong> Import transactions only. Requires columns: type, amount, date. Optional: currency, categoryId, note, receipt.<br/>
+            <strong>JSON Import:</strong> Import complete data backup including transactions and categories. Duplicate categories will be skipped.
+          </p>
         </div>
       </div>
     </div>
